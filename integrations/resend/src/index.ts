@@ -1,17 +1,43 @@
 import type { IntegrationClient, TriggerIntegration } from "@trigger.dev/sdk";
 import { Resend as ResendClient } from "resend";
-
+import {ErrorResponse} from "./ErrorInterface"
 import type { AuthenticatedTask } from "@trigger.dev/sdk";
 
 type SendEmailData = Parameters<InstanceType<typeof ResendClient>["sendEmail"]>[0];
 
 type SendEmailResponse = { id: string };
 
+function isRequestError(error: unknown): error is ErrorResponse {
+  return typeof error === "object" && error !== null && "status" in error;
+}
+
+function onError(error: unknown) {
+  console.log(error);
+  if (!isRequestError(error)) {
+    return;
+  }
+
+  // Check if this is a rate limit error
+  if (error.status === 429) {
+    const rateLimitReset = error.response.headers["x-ratelimit-reset"];
+
+    if (rateLimitReset) {
+      const resetDate = new Date(Number(rateLimitReset) * 1000);
+
+      return {
+        retryAt: resetDate,
+        error,
+      };
+    } 
+  }
+}
+
 export const sendEmail: AuthenticatedTask<
   InstanceType<typeof ResendClient>,
   SendEmailData,
   SendEmailResponse
 > = {
+  onError,
   run: async (params, client) => {
     return client.sendEmail(params) as Promise<SendEmailResponse>;
   },
